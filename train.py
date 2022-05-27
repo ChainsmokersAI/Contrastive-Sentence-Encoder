@@ -12,12 +12,13 @@ from torch.utils.tensorboard import SummaryWriter
 import transformers
 from transformers import AutoTokenizer, AutoModel, AdamW, get_linear_schedule_with_warmup
 
-from data_utils import SupervisedDataset, collate_fn_supervised
-from models import SupervisedSimCSE
+from data_utils import SupervisedDataset, UnsupervisedDataset, collate_fn_supervised, collate_fn_unsupervised
+from models import SupervisedSimCSE, UnsupervisedSimCSE
 
 # Parse Arguments
 parser=argparse.ArgumentParser(description="Contrastive Learning for Sentence Embeddings")
 # Required
+parser.add_argument("--model", type=str, required=True, help="Model: simcse-sup | simcse-unsup")
 parser.add_argument("--base", type=str, required=True, help="Base (Pre-Trained) LM")
 parser.add_argument("--dataset", type=str, required=True, help="Path of Dataset")
 parser.add_argument("--ddp", type=str, required=True, help="Multi-GPU Setting: True | False")
@@ -75,7 +76,7 @@ def train_ddp_simcse_sup(rank, world_size):
         # Set Distributed Sampler
         sampler.set_epoch(epoch)
 
-        loss_=0
+        _loss=0
         optimizer.zero_grad()
         for step, (sent, pos, neg) in enumerate(dataloader):
             # Load on Device
@@ -89,7 +90,7 @@ def train_ddp_simcse_sup(rank, world_size):
                 loss=loss/args.accum
             # Backward
             scaler.scale(loss).backward()
-            loss_+=loss.item()
+            _loss+=loss.item()
 
             # Step
             if (step+1)%args.accum==0:
@@ -99,10 +100,10 @@ def train_ddp_simcse_sup(rank, world_size):
                 if rank==0:
                     writer.add_scalar(
                         f'loss_train/SimCSE_Sup_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}',
-                        loss_,
+                        _loss,
                         step_global
                     )
-                loss_=0
+                _loss=0
                 
                 # Optimizer, Scheduler
                 scaler.step(optimizer)
@@ -126,6 +127,99 @@ def train_ddp_simcse_sup(rank, world_size):
                         map_location={'cuda:%d' % 0: 'cuda:%d' % rank}
                     ))
 
+def train_ddp_simcse_unsup(rank, world_size):
+    """
+    Unsupervised SimCSE
+    Paper: https://arxiv.org/abs/2104.08821
+    """
+    # Create Default Process Group
+    dist.init_process_group(backend="nccl", init_method="tcp://127.0.0.1:8973", rank=rank, world_size=world_size)
+
+    # Load Pre-Trained Tokenizer, LM
+    tokenizer=AutoTokenizer.from_pretrained(args.base)
+    pretrained=AutoModel.from_pretrained(args.base).to(rank)
+
+    # Load Dataset
+    dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer)
+    # Load Collate Function
+    collate_fn=collate_fn_unsupervised(pad_token_id=tokenizer.pad_token_id)
+    # Set Dataloader
+    sampler=DistributedSampler(dataset)
+    dataloader=DataLoader(dataset, batch_size=args.batch, shuffle=False, collate_fn=collate_fn, sampler=sampler)
+
+    # Model: Unsupervised SimCSE
+    model=UnsupervisedSimCSE(pretrained=pretrained).to(rank)
+    model_ddp=DDP(model, device_ids=[rank], find_unused_parameters=True)
+    model_ddp.train()
+    # Optimizer, Scheduler
+    optimizer=AdamW(model_ddp.parameters(), lr=args.lr, no_deprecation_warning=True)
+    scheduler=get_linear_schedule_with_warmup(
+        optimizer=optimizer,
+        num_warmup_steps=0,
+        num_training_steps=int(args.epochs*len(dataset)/(world_size*args.batch*args.accum))
+    )
+    # Mixed Precision: GradScaler
+    scaler=amp.GradScaler()
+
+    # Tensorboard
+    writer=SummaryWriter()
+
+    # Training
+    step_global=0
+    for epoch in range(args.epochs):
+        # Set Distributed Sampler
+        sampler.set_epoch(epoch)
+
+        _loss=0
+        optimizer.zero_grad()
+        for step, (sent, pos) in enumerate(dataloader):
+            # Load on Device
+            sent=sent.to(rank)
+            pos=pos.to(rank)
+            
+            # Forward
+            with amp.autocast():
+                loss=model_ddp(sent, pos)
+                loss=loss/args.accum
+            # Backward
+            scaler.scale(loss).backward()
+            _loss+=loss.item()
+
+            # Step
+            if (step+1)%args.accum==0:
+                step_global+=1
+                
+                # Tensorboard
+                if rank==0:
+                    writer.add_scalar(
+                        f'loss_train/SimCSE_Unsup_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}',
+                        _loss,
+                        step_global
+                    )
+                _loss=0
+                
+                # Optimizer, Scheduler
+                scaler.step(optimizer)
+                scaler.update()
+                scheduler.step()
+                optimizer.zero_grad()
+
+                # Eval Phase, Save Model
+                if (step_global)%250==0:
+                    # Save Model
+                    if rank==0:
+                        torch.save(
+                            model_ddp.module.state_dict(),
+                            f'./model/SimCSE_Unsup_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
+                        )
+                    # Block Process
+                    dist.barrier()
+                    # Load Model
+                    model_ddp.module.load_state_dict(torch.load(
+                        f'./model/SimCSE_Unsup_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth',
+                        map_location={'cuda:%d' % 0: 'cuda:%d' % rank}
+                    ))
+
 def main():
     # CUDA Available
     if torch.cuda.is_available():
@@ -135,7 +229,11 @@ def main():
         # Multi-GPU
         if args.ddp=="True" and world_size>=2:
             # Supervised SimCSE
-            mp.spawn(train_ddp_simcse_sup, args=(world_size,), nprocs=world_size, join=True)
+            if args.model=="simcse-sup":
+                mp.spawn(train_ddp_simcse_sup, args=(world_size,), nprocs=world_size, join=True)
+            # Unsupervised SimCSE
+            elif args.model=="simcse-unsup":
+                mp.spawn(train_ddp_simcse_unsup, args=(world_size,), nprocs=world_size, join=True)
         # Single GPU
         else:
             print("Train with Single GPU")
