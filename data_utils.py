@@ -37,25 +37,24 @@ class UnsupervisedDataset(Dataset):
         # Pair: Sentence, Positive (Maybe Same as Sentence)
         self.sent=[]
         self.pos=[]
-        
+
         # Load Data
-        df_unsup=pd.read_csv(path)
-        
-        for index in df_unsup.index:
-            data=df_unsup.loc[index]
-            
+        with open(path, "r") as f:
+            data=f.read().split("\n")
+            f.close()
+        # Remove Empty String
+        data.remove("")
+
+        for sentence in data:
             # Encode
-            enc0=tokenizer.encode(data["sent0"])
-            enc1=tokenizer.encode(data["sent1"])
+            enc=tokenizer.encode(sentence)
             # Truncate
-            if len(enc0)>512:
-                enc0=enc0[:511]+[tokenizer.eos_token_id]
-            if len(enc1)>512:
-                enc1=enc1[:511]+[tokenizer.eos_token_id]
+            if len(enc)>512:
+                enc=enc[:511]+[tokenizer.eos_token_id]
             # Append
-            self.sent.append(enc0)
-            self.pos.append(enc1)
-    
+            self.sent.append(enc)
+            self.pos.append(enc)
+            
     def __getitem__(self, idx):
         return self.sent[idx], self.pos[idx]
     

@@ -5,6 +5,8 @@ import torch.distributed as dist
 class SupervisedSimCSE(nn.Module):
     """
     Supervised SimCSE
+    paper: SimCSE: Simple Contrastive Learning of Sentence Embeddings
+    arXiv: https://arxiv.org/abs/2104.08821
     """
     def __init__(self, pretrained):
         super().__init__()
@@ -68,7 +70,7 @@ class SupervisedSimCSE(nn.Module):
         
         # Contrastive Loss
         sim=torch.cat([sim_pos, sim_neg], dim=1)
-        label=torch.arange(sim.size(0)).long().to(dist.get_rank())
+        label=torch.arange(sim.size(0)).long().to(sim.device)
         loss=self.loss(sim, label)
         
         return loss
@@ -76,6 +78,8 @@ class SupervisedSimCSE(nn.Module):
 class UnsupervisedSimCSE(nn.Module):
     """
     Unsupervised SimCSE
+    paper: SimCSE: Simple Contrastive Learning of Sentence Embeddings
+    arXiv: https://arxiv.org/abs/2104.08821
     """
     def __init__(self, pretrained):
         super().__init__()
@@ -134,7 +138,7 @@ class UnsupervisedSimCSE(nn.Module):
         sim=self.cos_sim(repr_sent.unsqueeze(1), repr_pos.unsqueeze(0))/self.temp
         
         # Contrastive Loss
-        label=torch.arange(sim.size(0)).long().to(dist.get_rank())
+        label=torch.arange(sim.size(0)).long().to(sim.device)
         loss=self.loss(sim, label)
         
         return loss
