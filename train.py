@@ -13,12 +13,12 @@ import transformers
 from transformers import AutoTokenizer, AutoModel, AdamW, get_linear_schedule_with_warmup
 
 from data_utils import SupervisedDataset, UnsupervisedDataset, collate_fn_supervised, collate_fn_unsupervised
-from models import SupervisedSimCSE, UnsupervisedSimCSE
+from models import SupervisedSimCSE, UnsupervisedSimCSE, PrefixSupervisedSimCSE
 
 # Parse Arguments
 parser=argparse.ArgumentParser(description="Contrastive Learning for Sentence Embeddings")
 # Required
-parser.add_argument("--model", type=str, required=True, help="Model: simcse-sup | simcse-unsup")
+parser.add_argument("--model", type=str, required=True, help="Model: simcse-sup(-prefix) | simcse-unsup")
 parser.add_argument("--base", type=str, required=True, help="Base (Pre-Trained) LM")
 parser.add_argument("--dataset", type=str, required=True, help="Path of Dataset")
 parser.add_argument("--ddp", type=str, required=True, help="Multi-GPU Setting: True | False")
@@ -27,19 +27,25 @@ parser.add_argument("--batch", type=int, default=32, help="Batch Size")
 parser.add_argument("--accum", type=int, default=4, help="Gradient Accumulation Steps")
 parser.add_argument("--lr", type=float, default=5e-5, help="Learning Rate")
 parser.add_argument("--epochs", type=int, default=3, help="Epochs")
+parser.add_argument("--preseqlen", type=int, default=5, help="Sequence Length of Prefix")
+parser.add_argument("--hidden", type=int, default=512, help="Hidden Dimension Size in Prefix-Tuning")
 #parser.add_argument("", type=, default=, help="")
 args=parser.parse_args()
 
 # NOT Logging Lower than ERROR
 transformers.logging.set_verbosity_error()
 
-def train(device, model_name, train_setting):
+def train(device, train_setting, use_prefix):
     """
     Train with Single Device (GPU or CPU)
     """
     # Load Pre-Trained Tokenizer, LM
     tokenizer=AutoTokenizer.from_pretrained(args.base)
     pretrained=AutoModel.from_pretrained(args.base).to(device)
+    # Freeze LM
+    if use_prefix:
+        for param in pretrained.parameters():
+            param.requires_grad=False
 
     # Load Dataset, Collate Function
     # Supervised
@@ -55,11 +61,18 @@ def train(device, model_name, train_setting):
 
     # Model
     # Supervised SimCSE
-    if model_name+"-"+train_setting=="simcse-sup":
+    if args.model=="simcse-sup":
         model=SupervisedSimCSE(pretrained=pretrained).to(device)
     # Unsupervised SimCSE
-    elif model_name+"-"+train_setting=="simcse-unsup":
+    elif args.model=="simcse-unsup":
         model=UnsupervisedSimCSE(pretrained=pretrained).to(device)
+    # Supervised SimCSE with Prefix-Tuning
+    elif args.model=="simcse-sup-prefix":
+        model=PrefixSupervisedSimCSE(
+            base_config=pretrained.config,
+            preseqlen=args.preseqlen,
+            hidden_dim=args.hidden
+        ).to(device)
     model.train()
     # Optimizer, Scheduler
     optimizer=AdamW(model.parameters(), lr=args.lr, no_deprecation_warning=True)
@@ -91,12 +104,14 @@ def train(device, model_name, train_setting):
             with amp.autocast():
                 # Supervised Setting
                 if len(data)==3:
-                    loss=model(sent, pos, neg)
-                    loss=loss/args.accum
+                    if use_prefix:
+                        loss=model(pretrained, sent, pos, neg)
+                    else:
+                        loss=model(sent, pos, neg)
                 # Unsupervised Setting
                 elif len(data)==2:
                     loss=model(sent, pos)
-                    loss=loss/args.accum
+                loss=loss/args.accum
             # Backward
             scaler.scale(loss).backward()
             _loss+=loss.item()
@@ -127,7 +142,7 @@ def train(device, model_name, train_setting):
                         f'./model/{args.model}_batch{int(args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
                     )
 
-def train_ddp(rank, world_size, model_name, train_setting):
+def train_ddp(rank, world_size, train_setting, use_prefix):
     """
     Train with Multiple GPUs using PyTorch Distributed Data Parallel
     docs: https://pytorch.org/docs/stable/notes/ddp.html
@@ -138,6 +153,10 @@ def train_ddp(rank, world_size, model_name, train_setting):
     # Load Pre-Trained Tokenizer, LM
     tokenizer=AutoTokenizer.from_pretrained(args.base)
     pretrained=AutoModel.from_pretrained(args.base).to(rank)
+    # Freeze LM
+    if use_prefix:
+        for param in pretrained.parameters():
+            param.requires_grad=False
 
     # Load Dataset, Collate Function
     # Supervised
@@ -154,12 +173,19 @@ def train_ddp(rank, world_size, model_name, train_setting):
 
     # Model
     # Supervised SimCSE
-    if model_name+"-"+train_setting=="simcse-sup":
+    if args.model=="simcse-sup":
         model=SupervisedSimCSE(pretrained=pretrained).to(rank)
     # Unsupervised SimCSE
-    elif model_name+"-"+train_setting=="simcse-unsup":
+    elif args.model=="simcse-unsup":
         model=UnsupervisedSimCSE(pretrained=pretrained).to(rank)
-    model_ddp=DDP(model, device_ids=[rank], find_unused_parameters=True)
+    # Supervised SimCSE with Prefix-Tuning
+    elif args.model=="simcse-sup-prefix":
+        model=PrefixSupervisedSimCSE(
+            base_config=pretrained.config,
+            preseqlen=args.preseqlen,
+            hidden_dim=args.hidden
+        ).to(rank)
+    model_ddp=DDP(model, device_ids=[rank], find_unused_parameters=not use_prefix)
     model_ddp.train()
     # Optimizer, Scheduler
     optimizer=AdamW(model_ddp.parameters(), lr=args.lr, no_deprecation_warning=True)
@@ -194,12 +220,14 @@ def train_ddp(rank, world_size, model_name, train_setting):
             with amp.autocast():
                 # Supervised Setting
                 if len(data)==3:
-                    loss=model_ddp(sent, pos, neg)
-                    loss=loss/args.accum
+                    if use_prefix:
+                        loss=model_ddp(pretrained, sent, pos, neg)
+                    else:
+                        loss=model_ddp(sent, pos, neg)
                 # Unsupervised Setting
                 elif len(data)==2:
                     loss=model_ddp(sent, pos)
-                    loss=loss/args.accum
+                loss=loss/args.accum
             # Backward
             scaler.scale(loss).backward()
             _loss+=loss.item()
@@ -240,6 +268,17 @@ def train_ddp(rank, world_size, model_name, train_setting):
                     ))
 
 def main():
+    # Train Setting: Prefix-Tuning
+    if args.model in ["simcse-sup", "simcse-unsup"]:
+        use_prefix=False
+    elif args.model in ["simcse-sup-prefix"]:
+        use_prefix=True
+    else:
+        print("Model NOT Supported")
+        return
+    # Train Setting: Sup or Unsup
+    train_setting=args.model.split("-")[1]
+    
     # CUDA Available
     if torch.cuda.is_available():
         # Number of GPUs
@@ -247,13 +286,10 @@ def main():
 
         # Multi-GPU
         if args.ddp=="True" and world_size>=2:
-            if args.model in ["simcse-sup", "simcse-unsup"]:
-                # Model, Train Setting (Sup or Unsup)
-                model_name, train_setting=args.model.split("-")
-                # Training
-                mp.spawn(train_ddp, args=(world_size, model_name, train_setting,), nprocs=world_size, join=True)
+            # Train
+            mp.spawn(train_ddp, args=(world_size, train_setting, use_prefix,), nprocs=world_size, join=True)
 
-                return
+            return
         # Single GPU
         else:
             device=torch.device("cuda:0")
@@ -261,11 +297,8 @@ def main():
     else:
         device=torch.device("cpu")
 
-    if args.model in["simcse-sup", "simcse-unsup"]:
-        # Model, Train Setting (Sup or Unsup)
-        model_name, train_setting=args.model.split("-")
-        # Training
-        train(device=device, model_name=model_name, train_setting=train_setting)
+    # Train
+    train(device=device, train_setting=train_setting, use_prefix=use_prefix)
 
 if __name__=="__main__":
     main()

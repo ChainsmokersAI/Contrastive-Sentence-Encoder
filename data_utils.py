@@ -50,7 +50,7 @@ class UnsupervisedDataset(Dataset):
             enc=tokenizer.encode(sentence)
             # Truncate
             if len(enc)>512:
-                enc=enc[:511]+[tokenizer.eos_token_id]
+                enc=enc[:511]+[tokenizer.sep_token_id]
             # Append
             self.sent.append(enc)
             self.pos.append(enc)
