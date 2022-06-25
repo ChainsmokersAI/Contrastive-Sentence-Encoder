@@ -7,7 +7,7 @@ class SupervisedDataset(Dataset):
     """
     Dataset for Supervised Contrastive Learning
     """
-    def __init__(self, path, tokenizer):
+    def __init__(self, path, tokenizer, use_gpt=False):
         # Triplet: Sentence, Positive, Hard Negative
         self.sent=[]
         self.pos=[]
@@ -19,9 +19,16 @@ class SupervisedDataset(Dataset):
         for index in df_sup.index:
             data=df_sup.loc[index]
             
-            self.sent.append(tokenizer.encode(data["sent0"]))
-            self.pos.append(tokenizer.encode(data["sent1"]))
-            self.neg.append(tokenizer.encode(data["hard_neg"]))
+            # In CPT Paper, Using Different Delimiters for [SOS] and [EOS]
+            # Leads to Stable Training
+            if use_gpt:
+                self.sent.append(tokenizer.encode("["+data["sent0"]+"]"))
+                self.pos.append(tokenizer.encode("{"+data["sent1"]+"}"))
+                self.neg.append(tokenizer.encode("{"+data["hard_neg"]+"}"))
+            else:
+                self.sent.append(tokenizer.encode(data["sent0"]))
+                self.pos.append(tokenizer.encode(data["sent1"]))
+                self.neg.append(tokenizer.encode(data["hard_neg"]))
     
     def __getitem__(self, idx):
         return self.sent[idx], self.pos[idx], self.neg[idx]

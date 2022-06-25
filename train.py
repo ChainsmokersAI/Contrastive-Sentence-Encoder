@@ -13,12 +13,18 @@ import transformers
 from transformers import AutoTokenizer, AutoModel, AdamW, get_linear_schedule_with_warmup
 
 from data_utils import SupervisedDataset, UnsupervisedDataset, collate_fn_supervised, collate_fn_unsupervised
-from models import SupervisedSimCSE, UnsupervisedSimCSE, PrefixSupervisedSimCSE, PrefixUnsupervisedSimCSE
+from models import (
+    SupervisedSimCSE,
+    UnsupervisedSimCSE,
+    PrefixSupervisedSimCSE,
+    PrefixUnsupervisedSimCSE,
+    SupervisedCPT
+)
 
 # Parse Arguments
 parser=argparse.ArgumentParser(description="Contrastive Learning for Sentence Embeddings")
 # Required
-parser.add_argument("--model", type=str, required=True, help="Model: simcse-sup(-prefix) | simcse-unsup(-prefix)")
+parser.add_argument("--model", type=str, required=True, help="Model: simcse|cpt-sup|unsup(-prefix)")
 parser.add_argument("--base", type=str, required=True, help="Base (Pre-Trained) LM")
 parser.add_argument("--dataset", type=str, required=True, help="Path of Dataset")
 parser.add_argument("--ddp", type=str, required=True, help="Multi-GPU Setting: True | False")
@@ -42,6 +48,10 @@ def train(device, train_setting, use_prefix):
     # Load Pre-Trained Tokenizer, LM
     tokenizer=AutoTokenizer.from_pretrained(args.base)
     pretrained=AutoModel.from_pretrained(args.base).to(device)
+    # Add Pad Token: [PAD]
+    if tokenizer.pad_token==None:
+        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        pretrained.resize_token_embeddings(len(tokenizer))
     # Freeze LM
     if use_prefix:
         for param in pretrained.parameters():
@@ -50,7 +60,7 @@ def train(device, train_setting, use_prefix):
     # Load Dataset, Collate Function
     # Supervised
     if train_setting=="sup":
-        dataset=SupervisedDataset(path=args.dataset, tokenizer=tokenizer)
+        dataset=SupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base)
         collate_fn=collate_fn_supervised(pad_token_id=tokenizer.pad_token_id)
     # Unsupervised
     elif train_setting=="unsup":
@@ -80,6 +90,9 @@ def train(device, train_setting, use_prefix):
             preseqlen=args.preseqlen,
             hidden_dim=args.hidden
         ).to(device)
+    # Supervised CPT
+    elif args.model=="cpt-sup":
+        model=SupervisedCPT(pretrained=pretrained, pad_token_id=tokenizer.pad_token_id).to(device)
     model.train()
     # Optimizer, Scheduler
     optimizer=AdamW(model.parameters(), lr=args.lr, no_deprecation_warning=True)
@@ -132,7 +145,7 @@ def train(device, train_setting, use_prefix):
                 
                 # Tensorboard
                 writer.add_scalar(
-                    f'loss_train/{args.model}_batch{int(args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}',
+                    f'loss_train/{args.model}({args.base})_batch{int(args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}',
                     _loss,
                     step_global
                 )
@@ -149,7 +162,7 @@ def train(device, train_setting, use_prefix):
                     # Save Model
                     torch.save(
                         model.state_dict(),
-                        f'./model/{args.model}_batch{int(args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
+                        f'./model/{args.model}({args.base})_batch{int(args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
                     )
 
 def train_ddp(rank, world_size, train_setting, use_prefix):
@@ -163,6 +176,10 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
     # Load Pre-Trained Tokenizer, LM
     tokenizer=AutoTokenizer.from_pretrained(args.base)
     pretrained=AutoModel.from_pretrained(args.base).to(rank)
+    # Add Pad Token: [PAD]
+    if tokenizer.pad_token==None:
+        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        pretrained.resize_token_embeddings(len(tokenizer))
     # Freeze LM
     if use_prefix:
         for param in pretrained.parameters():
@@ -171,7 +188,7 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
     # Load Dataset, Collate Function
     # Supervised
     if train_setting=="sup":
-        dataset=SupervisedDataset(path=args.dataset, tokenizer=tokenizer)
+        dataset=SupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base)
         collate_fn=collate_fn_supervised(pad_token_id=tokenizer.pad_token_id)
     # Unsupervised
     elif train_setting=="unsup":
@@ -202,6 +219,9 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
             preseqlen=args.preseqlen,
             hidden_dim=args.hidden
         ).to(rank)
+    # Supervised CPT
+    elif args.model=="cpt-sup":
+        model=SupervisedCPT(pretrained=pretrained, pad_token_id=tokenizer.pad_token_id).to(rank)
     model_ddp=DDP(model, device_ids=[rank], find_unused_parameters=not use_prefix)
     model_ddp.train()
     # Optimizer, Scheduler
@@ -259,7 +279,7 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
                 # Tensorboard
                 if rank==0:
                     writer.add_scalar(
-                        f'loss_train/{args.model}_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}',
+                        f'loss_train/{args.model}({args.base})_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}',
                         _loss,
                         step_global
                     )
@@ -277,19 +297,19 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
                     if rank==0:
                         torch.save(
                             model_ddp.module.state_dict(),
-                            f'./model/{args.model}_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
+                            f'./model/{args.model}({args.base})_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
                         )
                     # Block Process
                     dist.barrier()
                     # Load Model
                     model_ddp.module.load_state_dict(torch.load(
-                        f'./model/{args.model}_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth',
+                        f'./model/{args.model}({args.base})_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth',
                         map_location={'cuda:%d' % 0: 'cuda:%d' % rank}
                     ))
 
 def main():
     # Train Setting: Prefix-Tuning
-    if args.model in ["simcse-sup", "simcse-unsup"]:
+    if args.model in ["simcse-sup", "simcse-unsup", "cpt-sup"]:
         use_prefix=False
     elif args.model in ["simcse-sup-prefix", "simcse-unsup-prefix"]:
         use_prefix=True
