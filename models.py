@@ -475,3 +475,95 @@ class SupervisedCPT(nn.Module):
         loss=(loss_x+loss_y)/2
         
         return loss
+
+class UnsupervisedCPT(nn.Module):
+    """
+    Unsupervised CPT
+    Paper: Text and Code Embeddings by Contrastive Pre-Training
+    arXiv: https://arxiv.org/abs/2201.10005
+    """
+    def __init__(self, pretrained, pad_token_id=None):
+        super().__init__()
+        
+        # Pre-Trained LM
+        self.pretrained=pretrained
+        # "pad_token_id" of Pre-Trained Tokenizer
+        self.pad_token_id=pad_token_id
+        # Pooling Layer: MLP (Train Only)
+        self.mlp=nn.Linear(self.pretrained.config.hidden_size, self.pretrained.config.hidden_size)
+        
+        # Cosine Similarity
+        self.cos_sim=nn.CosineSimilarity(dim=-1)
+        # Temperature (Hyperparam)
+        self.temp=0.05
+        
+        # Contrastive Loss
+        self.loss=nn.CrossEntropyLoss()
+        
+    def pooler(self, x, eos_pos, on_train=False):
+        # [CLS] with MLP (Train Only)
+        x=x.last_hidden_state
+        index=torch.tensor(eos_pos).reshape(-1, 1, 1).expand(-1, -1, x.shape[-1])
+        x=torch.gather(x, 1, index.to(x.device)).squeeze(1)
+        if on_train:
+            return self.mlp(x)
+        else:
+            return x
+    
+    def get_embedding(self, x):
+        # Return Sentence Representation
+        eos_pos=[]
+        for enc in x.cpu():
+            pad_pos=np.where(enc.numpy()==self.pad_token_id)[0]
+            eos_pos.append(len(enc)-1 if len(pad_pos)==0 else pad_pos.min()-1)
+        x=self.pretrained(x)
+        return self.pooler(x, eos_pos=eos_pos)
+    
+    def forward(self, sent, pos):
+        # Find Position(Index) of [EOS]
+        eos_pos_sent=[]
+        for enc in sent.cpu():
+            pad_pos=np.where(enc.numpy()==self.pad_token_id)[0]
+            eos_pos_sent.append(len(enc)-1 if len(pad_pos)==0 else pad_pos.min()-1)
+        eos_pos_pos=[]
+        for enc in pos.cpu():
+            pad_pos=np.where(enc.numpy()==self.pad_token_id)[0]
+            eos_pos_pos.append(len(enc)-1 if len(pad_pos)==0 else pad_pos.min()-1)
+            
+        # Forward
+        sent=self.pretrained(sent)
+        pos=self.pretrained(pos)
+        
+        # Pooling
+        # Shape: batch_size x hidden_dim
+        repr_sent=self.pooler(sent, eos_pos=eos_pos_sent, on_train=True)
+        repr_pos=self.pooler(pos, eos_pos=eos_pos_pos, on_train=True)
+
+        # Multi-GPU
+        if dist.is_initialized():
+            repr_list_sent=[torch.zeros_like(repr_sent) for _ in range(dist.get_world_size())]
+            repr_list_pos=[torch.zeros_like(repr_pos) for _ in range(dist.get_world_size())]
+
+            # All Gather
+            dist.all_gather(tensor_list=repr_list_sent, tensor=repr_sent.contiguous())
+            dist.all_gather(tensor_list=repr_list_pos, tensor=repr_pos.contiguous())
+
+            # Grad Fn
+            repr_list_sent[dist.get_rank()]=repr_sent
+            repr_list_pos[dist.get_rank()]=repr_pos
+            
+            # Shape: (world_size * batch_size) x hidden_dim
+            repr_sent=torch.cat(repr_list_sent, dim=0)
+            repr_pos=torch.cat(repr_list_pos, dim=0)
+
+        # 2(Row & Column)-Directional Cosine Similarity
+        sim_x=self.cos_sim(repr_sent.unsqueeze(1), repr_pos.unsqueeze(0))/self.temp
+        sim_y=self.cos_sim(repr_pos.unsqueeze(1), repr_sent.unsqueeze(0))/self.temp
+        
+        # Contrastive Loss
+        label=torch.arange(sim_x.size(0)).long().to(sim_x.device)
+        loss_x=self.loss(sim_x, label)
+        loss_y=self.loss(sim_y, label)
+        loss=(loss_x+loss_y)/2
+
+        return loss

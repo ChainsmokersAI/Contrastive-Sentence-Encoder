@@ -18,7 +18,8 @@ from models import (
     UnsupervisedSimCSE,
     PrefixSupervisedSimCSE,
     PrefixUnsupervisedSimCSE,
-    SupervisedCPT
+    SupervisedCPT,
+    UnsupervisedCPT
 )
 
 # Parse Arguments
@@ -64,7 +65,7 @@ def train(device, train_setting, use_prefix):
         collate_fn=collate_fn_supervised(pad_token_id=tokenizer.pad_token_id)
     # Unsupervised
     elif train_setting=="unsup":
-        dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer)
+        dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base)
         collate_fn=collate_fn_unsupervised(pad_token_id=tokenizer.pad_token_id)
     # Set Dataloader
     dataloader=DataLoader(dataset, batch_size=args.batch, shuffle=True, collate_fn=collate_fn)
@@ -93,6 +94,9 @@ def train(device, train_setting, use_prefix):
     # Supervised CPT
     elif args.model=="cpt-sup":
         model=SupervisedCPT(pretrained=pretrained, pad_token_id=tokenizer.pad_token_id).to(device)
+    # Unsupervised CPT
+    elif args.model=="cpt-unsup":
+        model=UnsupervisedCPT(pretrained=pretrained, pad_token_id=tokenizer.pad_token_id).to(device)
     model.train()
     # Optimizer, Scheduler
     optimizer=AdamW(model.parameters(), lr=args.lr, no_deprecation_warning=True)
@@ -192,7 +196,7 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
         collate_fn=collate_fn_supervised(pad_token_id=tokenizer.pad_token_id)
     # Unsupervised
     elif train_setting=="unsup":
-        dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer)
+        dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base)
         collate_fn=collate_fn_unsupervised(pad_token_id=tokenizer.pad_token_id)
     # Set Dataloader
     sampler=DistributedSampler(dataset)
@@ -222,6 +226,9 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
     # Supervised CPT
     elif args.model=="cpt-sup":
         model=SupervisedCPT(pretrained=pretrained, pad_token_id=tokenizer.pad_token_id).to(rank)
+    # Unsupervised CPT
+    elif args.model=="cpt-unsup":
+        model=UnsupervisedCPT(pretrained=pretrained, pad_token_id=tokenizer.pad_token_id).to(rank)
     model_ddp=DDP(model, device_ids=[rank], find_unused_parameters=not use_prefix)
     model_ddp.train()
     # Optimizer, Scheduler
@@ -309,7 +316,7 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
 
 def main():
     # Train Setting: Prefix-Tuning
-    if args.model in ["simcse-sup", "simcse-unsup", "cpt-sup"]:
+    if args.model in ["simcse-sup", "simcse-unsup", "cpt-sup", "cpt-unsup"]:
         use_prefix=False
     elif args.model in ["simcse-sup-prefix", "simcse-unsup-prefix"]:
         use_prefix=True

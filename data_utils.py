@@ -7,7 +7,7 @@ class SupervisedDataset(Dataset):
     """
     Dataset for Supervised Contrastive Learning
     """
-    def __init__(self, path, tokenizer, use_gpt=False):
+    def __init__(self, path, tokenizer, use_gpt):
         # Triplet: Sentence, Positive, Hard Negative
         self.sent=[]
         self.pos=[]
@@ -40,7 +40,7 @@ class UnsupervisedDataset(Dataset):
     """
     Dataset for Unsupervised Contrastive Learning
     """
-    def __init__(self, path, tokenizer):
+    def __init__(self, path, tokenizer, use_gpt):
         # Pair: Sentence, Positive (Maybe Same as Sentence)
         self.sent=[]
         self.pos=[]
@@ -52,15 +52,29 @@ class UnsupervisedDataset(Dataset):
         # Remove Empty String
         data.remove("")
 
+        # Max Sequence Length
+        max_seq_len=192
         for sentence in data:
-            # Encode
-            enc=tokenizer.encode(sentence)
-            # Truncate
-            if len(enc)>384:
-                enc=enc[:383]+[tokenizer.sep_token_id]
-            # Append
-            self.sent.append(enc)
-            self.pos.append(enc)
+            if use_gpt:
+                # Encode
+                enc=tokenizer.encode(sentence)
+                # Truncate
+                if len(enc)>max_seq_len-2:
+                    enc=enc[:max_seq_len-2]
+                # Append
+                # In CPT Paper, Using Different Delimiters for [SOS] and [EOS]
+                # Leads to Stable Training
+                self.sent.append(tokenizer.encode("[")+enc+tokenizer.encode("]"))
+                self.pos.append(tokenizer.encode("{")+enc+tokenizer.encode("}"))
+            else:
+                # Encode
+                enc=tokenizer.encode(sentence)
+                # Truncate
+                if len(enc)>max_seq_len:
+                    enc=enc[:max_seq_len-1]+[enc[-1]]
+                # Append
+                self.sent.append(enc)
+                self.pos.append(enc)
             
     def __getitem__(self, idx):
         return self.sent[idx], self.pos[idx]
