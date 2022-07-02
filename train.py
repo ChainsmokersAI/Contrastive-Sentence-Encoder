@@ -19,7 +19,9 @@ from models import (
     PrefixSupervisedSimCSE,
     PrefixUnsupervisedSimCSE,
     SupervisedCPT,
-    UnsupervisedCPT
+    UnsupervisedCPT,
+    PrefixSupervisedCPT,
+    PrefixUnsupervisedCPT
 )
 
 # Parse Arguments
@@ -97,6 +99,22 @@ def train(device, train_setting, use_prefix):
     # Unsupervised CPT
     elif args.model=="cpt-unsup":
         model=UnsupervisedCPT(pretrained=pretrained, pad_token_id=tokenizer.pad_token_id).to(device)
+    # Supervised CPT with Prefix-Tuning
+    elif args.model=="cpt-sup-prefix":
+        model=PrefixSupervisedCPT(
+            base_config=pretrained.config,
+            pad_token_id=tokenizer.pad_token_id,
+            preseqlen=args.preseqlen,
+            hidden_dim=args.hidden
+        ).to(device)
+    # Unsupervised CPT with Prefix-Tuning
+    elif args.model=="cpt-unsup-prefix":
+        model=PrefixUnsupervisedCPT(
+            base_config=pretrained.config,
+            pad_token_id=tokenizer.pad_token_id,
+            preseqlen=args.preseqlen,
+            hidden_dim=args.hidden
+        ).to(device)
     model.train()
     # Optimizer, Scheduler
     optimizer=AdamW(model.parameters(), lr=args.lr, no_deprecation_warning=True)
@@ -229,6 +247,22 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
     # Unsupervised CPT
     elif args.model=="cpt-unsup":
         model=UnsupervisedCPT(pretrained=pretrained, pad_token_id=tokenizer.pad_token_id).to(rank)
+    # Supervised CPT with Prefix-Tuning
+    elif args.model=="cpt-sup-prefix":
+        model=PrefixSupervisedCPT(
+            base_config=pretrained.config,
+            pad_token_id=tokenizer.pad_token_id,
+            preseqlen=args.preseqlen,
+            hidden_dim=args.hidden
+        ).to(rank)
+    # Unsupervised CPT with Prefix-Tuning
+    elif args.model=="cpt-unsup-prefix":
+        model=PrefixUnsupervisedCPT(
+            base_config=pretrained.config,
+            pad_token_id=tokenizer.pad_token_id,
+            preseqlen=args.preseqlen,
+            hidden_dim=args.hidden
+        ).to(rank)
     model_ddp=DDP(model, device_ids=[rank], find_unused_parameters=not use_prefix)
     model_ddp.train()
     # Optimizer, Scheduler
@@ -318,7 +352,7 @@ def main():
     # Train Setting: Prefix-Tuning
     if args.model in ["simcse-sup", "simcse-unsup", "cpt-sup", "cpt-unsup"]:
         use_prefix=False
-    elif args.model in ["simcse-sup-prefix", "simcse-unsup-prefix"]:
+    elif args.model in ["simcse-sup-prefix", "simcse-unsup-prefix", "cpt-sup-prefix", "cpt-unsup-prefix"]:
         use_prefix=True
     else:
         print("Model NOT Supported")
