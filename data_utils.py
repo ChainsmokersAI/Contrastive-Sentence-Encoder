@@ -7,7 +7,7 @@ class SupervisedDataset(Dataset):
     """
     Dataset for Supervised Contrastive Learning
     """
-    def __init__(self, path, tokenizer, use_gpt):
+    def __init__(self, path, tokenizer, use_gpt, max_seq_len):
         # Triplet: Sentence, Positive, Hard Negative
         self.sent=[]
         self.pos=[]
@@ -22,13 +22,22 @@ class SupervisedDataset(Dataset):
             # In CPT Paper, Using Different Delimiters for [SOS] and [EOS]
             # Leads to Stable Training
             if use_gpt:
-                self.sent.append(tokenizer.encode("["+data["sent0"]+"]"))
-                self.pos.append(tokenizer.encode("{"+data["sent1"]+"}"))
-                self.neg.append(tokenizer.encode("{"+data["hard_neg"]+"}"))
+                sent0=tokenizer.encode("["+data["sent0"]+"]")
+                sent1=tokenizer.encode("{"+data["sent1"]+"}")
+                hard_neg=tokenizer.encode("{"+data["hard_neg"]+"}")
             else:
-                self.sent.append(tokenizer.encode(data["sent0"]))
-                self.pos.append(tokenizer.encode(data["sent1"]))
-                self.neg.append(tokenizer.encode(data["hard_neg"]))
+                sent0=tokenizer.encode(data["sent0"])
+                sent1=tokenizer.encode(data["sent1"])
+                hard_neg=tokenizer.encode(data["hard_neg"])
+
+            # Only Use Sentences Shorter than MAX_SEQ_LEN
+            if len(sent0)+len(sent1)+len(hard_neg)>max_seq_len:
+                continue
+
+            # Append
+            self.sent.append(sent0)
+            self.pos.append(sent1)
+            self.neg.append(hard_neg)
     
     def __getitem__(self, idx):
         return self.sent[idx], self.pos[idx], self.neg[idx]
@@ -40,7 +49,7 @@ class UnsupervisedDataset(Dataset):
     """
     Dataset for Unsupervised Contrastive Learning
     """
-    def __init__(self, path, tokenizer, use_gpt):
+    def __init__(self, path, tokenizer, use_gpt, max_seq_len):
         # Pair: Sentence, Positive (Maybe Same as Sentence)
         self.sent=[]
         self.pos=[]
@@ -51,9 +60,7 @@ class UnsupervisedDataset(Dataset):
             f.close()
         # Remove Empty String
         data.remove("")
-
-        # Max Sequence Length
-        max_seq_len=192
+        
         for sentence in data:
             if use_gpt:
                 # Encode

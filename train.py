@@ -34,6 +34,7 @@ parser.add_argument("--ddp", type=str, required=True, help="Multi-GPU Setting: T
 # NOT Required
 parser.add_argument("--batch", type=int, default=32, help="Batch Size")
 parser.add_argument("--accum", type=int, default=4, help="Gradient Accumulation Steps")
+parser.add_argument("--maxseqlen", type=int, default=256, help="Max Total Sequence Length")
 parser.add_argument("--lr", type=float, default=5e-5, help="Learning Rate")
 parser.add_argument("--epochs", type=int, default=3, help="Epochs")
 parser.add_argument("--preseqlen", type=int, default=5, help="Sequence Length of Prefix")
@@ -63,11 +64,11 @@ def train(device, train_setting, use_prefix):
     # Load Dataset, Collate Function
     # Supervised
     if train_setting=="sup":
-        dataset=SupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base)
+        dataset=SupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base, max_seq_len=args.maxseqlen)
         collate_fn=collate_fn_supervised(pad_token_id=tokenizer.pad_token_id)
     # Unsupervised
     elif train_setting=="unsup":
-        dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base)
+        dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base, max_seq_len=args.maxseqlen)
         collate_fn=collate_fn_unsupervised(pad_token_id=tokenizer.pad_token_id)
     # Set Dataloader
     dataloader=DataLoader(dataset, batch_size=args.batch, shuffle=True, collate_fn=collate_fn)
@@ -210,11 +211,11 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
     # Load Dataset, Collate Function
     # Supervised
     if train_setting=="sup":
-        dataset=SupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base)
+        dataset=SupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base, max_seq_len=args.maxseqlen)
         collate_fn=collate_fn_supervised(pad_token_id=tokenizer.pad_token_id)
     # Unsupervised
     elif train_setting=="unsup":
-        dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base)
+        dataset=UnsupervisedDataset(path=args.dataset, tokenizer=tokenizer, use_gpt="gpt" in args.base, max_seq_len=args.maxseqlen)
         collate_fn=collate_fn_unsupervised(pad_token_id=tokenizer.pad_token_id)
     # Set Dataloader
     sampler=DistributedSampler(dataset)
