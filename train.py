@@ -166,9 +166,14 @@ def train(device, train_setting, use_prefix):
             if (step+1)%args.accum==0:
                 step_global+=1
                 
+                # Model Tag
+                if use_prefix:
+                    model_tag=f'loss_train/{args.model}({args.base})_preseqlen{args.preseqlen}_hidden{args.hidden}_batch{int(args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}'
+                else:
+                    model_tag=f'loss_train/{args.model}({args.base})_batch{int(args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}'
                 # Tensorboard
                 writer.add_scalar(
-                    f'loss_train/{args.model}({args.base})_batch{int(args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}',
+                    model_tag,
                     _loss,
                     step_global
                 )
@@ -180,12 +185,17 @@ def train(device, train_setting, use_prefix):
                 scheduler.step()
                 optimizer.zero_grad()
 
+                # Path for Saving Model
+                if use_prefix:
+                    model_path=f'./model/{args.model}({args.base})_preseqlen{args.preseqlen}_hidden{args.hidden}_batch{int(args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
+                else:
+                    model_path=f'./model/{args.model}({args.base})_batch{int(args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
                 # Eval Phase, Save Model
                 if (step_global)%250==0:
                     # Save Model
                     torch.save(
                         model.state_dict(),
-                        f'./model/{args.model}({args.base})_batch{int(args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
+                        model_path
                     )
 
 def train_ddp(rank, world_size, train_setting, use_prefix):
@@ -318,10 +328,15 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
             if (step+1)%args.accum==0:
                 step_global+=1
                 
+                # Model Tag
+                if use_prefix:
+                    model_tag=f'loss_train/{args.model}({args.base})_preseqlen{args.preseqlen}_hidden{args.hidden}_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}'
+                else:
+                    model_tag=f'loss_train/{args.model}({args.base})_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}'
                 # Tensorboard
                 if rank==0:
                     writer.add_scalar(
-                        f'loss_train/{args.model}({args.base})_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_epochs{args.epochs}',
+                        model_tag,
                         _loss,
                         step_global
                     )
@@ -333,19 +348,24 @@ def train_ddp(rank, world_size, train_setting, use_prefix):
                 scheduler.step()
                 optimizer.zero_grad()
 
+                # Path for Saving Model
+                if use_prefix:
+                    model_path=f'./model/{args.model}({args.base})_preseqlen{args.preseqlen}_hidden{args.hidden}_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
+                else:
+                    model_path=f'./model/{args.model}({args.base})_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
                 # Eval Phase, Save Model
                 if (step_global)%250==0:
                     # Save Model
                     if rank==0:
                         torch.save(
                             model_ddp.module.state_dict(),
-                            f'./model/{args.model}({args.base})_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth'
+                            model_path
                         )
                     # Block Process
                     dist.barrier()
                     # Load Model
                     model_ddp.module.load_state_dict(torch.load(
-                        f'./model/{args.model}({args.base})_batch{int(world_size*args.batch*args.accum)}_lr{args.lr}_step{step_global}.pth',
+                        model_path,
                         map_location={'cuda:%d' % 0: 'cuda:%d' % rank}
                     ))
 

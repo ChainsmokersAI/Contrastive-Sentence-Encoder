@@ -166,13 +166,9 @@ class PrefixSupervisedSimCSE(nn.Module):
         # Reparam
         self.reparam=nn.Sequential(
             nn.Linear(base_config.hidden_size, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 2*base_config.num_hidden_layers*base_config.hidden_size)
         )
-        # Dropout
-        self.dropout=nn.Dropout(p=0.0)
 
         ## SimCSE
         # Cosine Similarity
@@ -204,8 +200,6 @@ class PrefixSupervisedSimCSE(nn.Module):
         )
         # 2*num_hidden_layers, batch_size, num_attention_heads, preseqlen, hidden_size/num_attention_heads
         past_key_values=preseq.permute(2, 0, 3, 1, 4)
-        # Dropout
-        past_key_values=self.dropout(past_key_values)
 
         return past_key_values.split(2)
         
@@ -283,13 +277,9 @@ class PrefixUnsupervisedSimCSE(nn.Module):
         # Reparam
         self.reparam=nn.Sequential(
             nn.Linear(base_config.hidden_size, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 2*base_config.num_hidden_layers*base_config.hidden_size)
         )
-        # Dropout
-        self.dropout=nn.Dropout(p=0.1)
 
         ## SimCSE
         # Pooling Layer: MLP (Train Only)
@@ -324,8 +314,6 @@ class PrefixUnsupervisedSimCSE(nn.Module):
         )
         # 2*num_hidden_layers, batch_size, num_attention_heads, preseqlen, hidden_size/num_attention_heads
         past_key_values=preseq.permute(2, 0, 3, 1, 4)
-        # Dropout
-        past_key_values=self.dropout(past_key_values)
 
         return past_key_values.split(2)
 
@@ -587,17 +575,15 @@ class PrefixSupervisedCPT(nn.Module):
         # Reparam
         self.reparam=nn.Sequential(
             nn.Linear(base_config.hidden_size, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 2*base_config.num_hidden_layers*base_config.hidden_size)
         )
-        # Dropout
-        self.dropout=nn.Dropout(p=0.0)
 
         ## CPT
         # "pad_token_id" of Pre-Trained Tokenizer
         self.pad_token_id=pad_token_id
+        # Pooling Layer: MLP
+        self.mlp=nn.Linear(base_config.hidden_size, base_config.hidden_size)
         # Cosine Similarity
         self.cos_sim=nn.CosineSimilarity(dim=-1)
         # Temperature (Hyperparam)
@@ -606,10 +592,11 @@ class PrefixSupervisedCPT(nn.Module):
         self.loss=nn.CrossEntropyLoss()
         
     def pooler(self, x, eos_pos):
-        # [CLS] without MLP (Hyperparam)
+        # [CLS] with MLP (Hyperparam)
         x=x.last_hidden_state
         index=torch.tensor(eos_pos).reshape(-1, 1, 1).expand(-1, -1, x.shape[-1])
-        return torch.gather(x, 1, index.to(x.device)).squeeze(1)
+        x=torch.gather(x, 1, index.to(x.device)).squeeze(1)
+        return self.mlp(x)
 
     def get_prefix(self, batch_size, device):
         # Return Prefix
@@ -629,8 +616,6 @@ class PrefixSupervisedCPT(nn.Module):
         )
         # 2*num_hidden_layers, batch_size, num_attention_heads, preseqlen, hidden_size/num_attention_heads
         past_key_values=preseq.permute(2, 0, 3, 1, 4)
-        # Dropout
-        past_key_values=self.dropout(past_key_values)
 
         return past_key_values.split(2)
 
@@ -733,35 +718,28 @@ class PrefixUnsupervisedCPT(nn.Module):
         # Reparam
         self.reparam=nn.Sequential(
             nn.Linear(base_config.hidden_size, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 2*base_config.num_hidden_layers*base_config.hidden_size)
         )
-        # Dropout
-        self.dropout=nn.Dropout(p=0.1)
 
         ## CPT
         # "pad_token_id" of Pre-Trained Tokenizer
         self.pad_token_id=pad_token_id
-        # Pooling Layer: MLP (Train Only)
+        # Pooling Layer: MLP
         self.mlp=nn.Linear(base_config.hidden_size, base_config.hidden_size)
         # Cosine Similarity
         self.cos_sim=nn.CosineSimilarity(dim=-1)
         # Temperature (Hyperparam)
-        self.temp=0.05
+        self.temp=0.07
         # Contrastive Loss
         self.loss=nn.CrossEntropyLoss()
         
-    def pooler(self, x, eos_pos, on_train=False):
-        # [CLS] with MLP (Train Only)
+    def pooler(self, x, eos_pos):
+        # [CLS] with MLP (Hyperparam)
         x=x.last_hidden_state
         index=torch.tensor(eos_pos).reshape(-1, 1, 1).expand(-1, -1, x.shape[-1])
         x=torch.gather(x, 1, index.to(x.device)).squeeze(1)
-        if on_train:
-            return self.mlp(x)
-        else:
-            return x
+        return self.mlp(x)
 
     def get_prefix(self, batch_size, device):
         # Return Prefix
@@ -781,8 +759,6 @@ class PrefixUnsupervisedCPT(nn.Module):
         )
         # 2*num_hidden_layers, batch_size, num_attention_heads, preseqlen, hidden_size/num_attention_heads
         past_key_values=preseq.permute(2, 0, 3, 1, 4)
-        # Dropout
-        past_key_values=self.dropout(past_key_values)
 
         return past_key_values.split(2)
 
@@ -818,8 +794,8 @@ class PrefixUnsupervisedCPT(nn.Module):
         
         # Pooling
         # Shape: batch_size x hidden_dim
-        repr_sent=self.pooler(sent, eos_pos=eos_pos_sent, on_train=True)
-        repr_pos=self.pooler(pos, eos_pos=eos_pos_pos, on_train=True)
+        repr_sent=self.pooler(sent, eos_pos=eos_pos_sent)
+        repr_pos=self.pooler(pos, eos_pos=eos_pos_pos)
 
         # Multi-GPU
         if dist.is_initialized():
