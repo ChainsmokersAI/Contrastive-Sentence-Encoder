@@ -33,7 +33,7 @@ parser.add_argument("--dataset", type=str, required=True, help="Path of Dataset"
 parser.add_argument("--ddp", type=str, required=True, help="Multi-GPU Setting: True | False")
 # NOT Required
 parser.add_argument("--batch", type=int, default=32, help="Batch Size")
-parser.add_argument("--accum", type=int, default=4, help="Gradient Accumulation Steps")
+parser.add_argument("--accum", type=int, default=2, help="Gradient Accumulation Steps")
 parser.add_argument("--maxseqlen", type=int, default=256, help="Max Total Sequence Length")
 parser.add_argument("--lr", type=float, default=5e-5, help="Learning Rate")
 parser.add_argument("--epochs", type=int, default=3, help="Epochs")
