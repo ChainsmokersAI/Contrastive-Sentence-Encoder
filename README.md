@@ -12,18 +12,18 @@ I have implemented some *bi-encoder* models with *contrastive learning* and refe
 ## Models
 Models are **NOT exactly same** as in their paper.
 ### SimCSE (sup/unsup)
-Train *BERT* or *RoBERTa* with Contrastive Loss.<br/>
-Unsupervised [SimCSE](https://arxiv.org/abs/2104.08821) uses Dropout to attain positive pairs.
+* Train *BERT* or *RoBERTa* with Contrastive Loss
+* Unsupervised [SimCSE](https://arxiv.org/abs/2104.08821) uses Dropout to attain positive pairs
 ### SimCSE with Prefix-Tuning (sup)
-Train SimCSE with [Prefix-Tuning](https://arxiv.org/abs/2101.00190) which enables memory/time-efficient training.<br/>
-[DCPCSE](https://arxiv.org/abs/2203.06875) shows a little performance gain on similar way. But, for my own works, this model **did not work** very well, especially on unsupervised setting.
+* Train SimCSE with [Prefix-Tuning](https://arxiv.org/abs/2101.00190) which enables memory/time-efficient training
+* [DCPCSE](https://arxiv.org/abs/2203.06875) shows a little performance gain on similar way. But, for my own works, this model **did not work** very well, especially on unsupervised setting
 ### CPT (sup/unsup)
-Train *GPT-2* with Contrastive Loss.<br/>
-Original [CPT](https://arxiv.org/abs/2201.10005) **does not support** fully-unsupervised setting as SimCSE does using Dropout. It uses weak supervision from noisy Internet documents.<br/>
-However, in my works, I implemented unsupervised CPT **in the same way as SimCSE**.
+* Train *GPT-2* with Contrastive Loss
+* Original [CPT](https://arxiv.org/abs/2201.10005) **does not support** fully-unsupervised setting as SimCSE does using Dropout. It uses weak supervision from noisy Internet documents
+* However, in my works, I implemented unsupervised CPT **in the same way as SimCSE**
 ### CPT with Prefix-Tuning (sup/unsup)
-Train CPT with Prefix-Tuning.<br/>
-Training of unsupervised CPT is very unstable and early stages of training determine the final model's performance.
+* Train CPT with Prefix-Tuning
+* Training of unsupervised CPT is very unstable and early stages of training determine the final model's performance
 ## Usage (OS: Ubuntu)
 ### Packages
 * pandas
@@ -63,7 +63,7 @@ python train.py --model=cpt-unsup-prefix \
 --hidden=512 # hidden dimension size of prefix
 ```
 ### Evaluation
-Evaluate trained models on STS Benchmark dataset.<br/>
+Evaluate trained models on STS Benchmark dataset.<br/><br/>
 Example 1) Supervised SimCSE
 ```bash
 python evaluate.py --model=simcse-sup \
@@ -86,7 +86,9 @@ Models are saved per every 250 steps and best results are showed below.
 |simcse-unsup|roberta-base|256 (128*2)|5e-5|3|**80.80**|
 |cpt-sup|gpt2<br/>(117M)|192 (96*2)|1e-4|10|**77.50**|
 |cpt-unsup|gpt2|192 (96*2)|1e-4|3|**66.64**|
+
 with Prefix-Tuning
+
 |Model|Base LM|preseqlen|hidden|Batch Size|LR|Epochs|Spearmanr|File Size|
 |----|----|----|----|----|----|----|----|----|
 |simcse-sup-prefix|roberta-base|10|768|128 (128*1)|5e-5|1|**82.69**|*59.1MB*|
