@@ -89,8 +89,8 @@ Models are saved per every 250 steps and best results are showed below.
 
 with Prefix-Tuning
 
-|Model|Base LM|preseqlen|hidden|Batch Size|LR|Epochs|Spearmanr|File Size|
-|----|----|----|----|----|----|----|----|----|
-|simcse-sup-prefix|roberta-base|10|768|128 (128*1)|5e-5|1|**82.69**|*59.1MB*|
-|cpt-sup-prefix|gpt2|5|512|192 (96*2)|1e-4|10|**74.04**|*41.8MB*|
-|cpt-unsup-prefix|gpt2|5|512|192 (96*2)|1e-4|3|**69.08**|*41.8MB*|
+|Model|Base|Prefix|Batch|LR|Epochs|Spearmanr|Size|
+|----|----|----|----|----|----|----|----|
+|simcse<br/>-sup-prefix|roberta<br/>-base|10/768<br/>(len/hidden)|128 (128*1)|5e-5|1|**82.69**|*59.1MB*|
+|cpt-sup-prefix|gpt2|5/512|192 (96*2)|1e-4|10|**74.04**|*41.8MB*|
+|cpt-unsup-prefix|gpt2|5/512|192 (96*2)|1e-4|3|**69.08**|*41.8MB*|
