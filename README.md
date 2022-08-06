@@ -36,8 +36,8 @@ Models are **NOT exactly same** as in their paper.
 Download datasets for training and evaluation.<br/>
 I have used [official SimCSE trainset](https://github.com/princeton-nlp/SimCSE/tree/main/data) for **all model** and [STS Benchmark dataset](https://ixa2.si.ehu.eus/stswiki/index.php/STSbenchmark) for evaluation.
 ```bash
-git clone https://github.com/ChainsmokersAI/Sentence-Encoder.git
-cd Sentence-Encoder/
+git clone https://github.com/ChainsmokersAI/Contrastive-Sentence-Encoder.git
+cd Contrastive-Sentence-Encoder/
 # download datasets and make directory where trained models will be saved
 sh download_dataset.sh
 ```
